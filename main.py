@@ -28,11 +28,16 @@ class Start(QWidget):
         global PET_NAME
         name = self.name_input.text()
         if name in db.get_pets():
-            self.parent().main_screen.show()
-            self.parent().set_window_size(791, 540)
-            self.hide()
-            ticks.start()
             PET_NAME = name
+            if db.get_info()[3] == 0:
+                self.parent().set_window_size(389, 169)
+                self.parent().dead_screen.show()
+                self.hide()
+            else:
+                self.parent().main_screen.show()
+                self.parent().set_window_size(791, 540)
+                self.hide()
+                ticks.start()
         else:
             self.error_photo.setPixmap(QPixmap("error.png"))
             self.error.setText('Такого питомца не существует!')
@@ -497,7 +502,8 @@ class Game_3(QWidget):
         self.combination = []
         self.round = 1
         self.pressed = 0
-        self.koeficent = 1
+        self.koeficent = 0.6
+        self.win_money = 0
 
     def swith_to_game_select(self):
         self.parent().game_menu_screen.show()
@@ -526,7 +532,10 @@ class Game_3(QWidget):
                     self.combination.append(r.randint(1, 9))
                     self.warning.setText("Игра началась")
                     self.result.setText(str(self.combination[0]))
-                    self.koef.setText(f'{self.koeficent}x')
+                    self.koef.setText(f'{self.win_money}')
+                    info['money'] -= self.bet_money
+                    db.update_info()
+                    self.update_money()
             else:
                 self.warning.setHidden(False)
                 self.warning_photo.setHidden(False)
@@ -660,25 +669,32 @@ class Game_3(QWidget):
 
     def collect_money(self):
         if self.start:
-            self.start = False
-            self.result.setHidden(False)
-            self.result.setText('Вы забрали деньги!')
-            info['money'] += int(self.bet_money * (self.koeficent - 1))
-            print(int(self.bet_money * (self.koeficent - 1)), self.koeficent)
-            db.update_info()
-            self.update_money()
-            self.koeficent = 1
-            self.koef.setText(f'{self.koeficent}x')
+            if self.round > 2:
+                self.start = False
+                self.result.setHidden(False)
+                self.result.setText('Вы забрали деньги!')
+                info['money'] += self.win_money
+                db.update_info()
+                self.update_money()
+                self.koeficent = 0.6
+                self.koef.setText(f'{self.win_money}')
+                self.round = 1
+                self.count = 0
+                self.win_money = 0
+            else:
+                self.warning_photo.setHidden(False)
+                self.warning_photo.setPixmap(QPixmap('error.png'))
+                self.warning.setText("Забрать можно после 2 раунда")
 
     def lose(self):
         self.start = False
-        info['money'] -= self.bet_money
         self.result.setHidden(False)
         self.result.setText('Вы проиграли')
         db.update_info()
         self.update_money()
-        self.koeficent = 1
-        self.koef.setText(f'{self.koeficent}x')
+        self.koeficent = 0.6
+        self.win_money = 0
+        self.koef.setText(f'{self.win_money}')
         self.warning.setHidden(True)
         self.count = 0
         self.round = 1
@@ -689,8 +705,29 @@ class Game_3(QWidget):
         self.combination = [r.randint(1, 9) for i in range(self.round)]
         self.result.setHidden(False)
         self.result.setText(' '.join(list(map(str, self.combination))))
-        self.koeficent = 1 + ((self.round ** 2 - self.round) / 10)
-        self.koef.setText(f'{self.koeficent}x')
+        self.win_money = int(self.bet_money * (self.koeficent * 1.15 ** self.round))
+        self.koef.setText(f'{self.win_money}')
+
+
+class Dead_menu(QWidget):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        uic.loadUi('dead.ui', self)
+        self.initUI()
+
+    def initUI(self):
+        self.back_to_menu.clicked.connect(self.switch_to_logging)
+
+    def switch_to_logging(self):
+        self.hide()
+        self.parent().start_menu.show()
+        self.parent().set_window_size(380, 296)
+
+    def activate(self):
+        self.parent().set_window_size(389, 169)
+        ticks.paused()
+        MainWindow.main_screen.hide()
+        self.show()
 
 
 class Game(QMainWindow):
@@ -715,6 +752,8 @@ class Game(QMainWindow):
         self.game2_screen.hide()
         self.game3_screen = Game_3(self)
         self.game3_screen.hide()
+        self.dead_screen = Dead_menu(self)
+        self.dead_screen.hide()
         self.setWindowIcon(QIcon('logo.png'))
         self.setWindowTitle('Мой Говорящий Квадробер')
 
@@ -750,6 +789,10 @@ class TickMaster(threading.Thread):
                     info['water'] = 0
                 if info['food'] < 0:
                     info['food'] = 0
+                if info['health'] <= 0:
+                    info['health'] = 0
+                    db.update_info()
+                    MainWindow.dead_screen.activate()
                 db.update_info()
                 MainWindow.main_screen.label_update()
                 time.sleep(10)
